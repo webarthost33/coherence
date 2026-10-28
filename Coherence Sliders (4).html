@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Coherence Sliders</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:light;
+  --green:#05B084;--cream:#F1EDEA;--blue:#015A84;--mint:#BADFCD;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  background-color:var(--cream);
+  background-image:conic-gradient(rgba(1,90,132,.035) 25%,transparent 0 50%,rgba(1,90,132,.035) 0 75%,transparent 0);
+  background-size:56px 56px;
+  color:var(--blue);
+  font-family:"Space Grotesk","Helvetica Neue",Arial,sans-serif;
+  display:flex;align-items:center;justify-content:center;
+  min-height:100vh;padding:24px 16px;
+}
+#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:5}
+.card{
+  width:100%;max-width:800px;
+  background:var(--mint);border:4px solid var(--blue);border-radius:22px;
+  padding:4px 26px;box-shadow:10px 10px 0 var(--blue);
+}
+.card.shake{animation:shake .32s linear}
+@keyframes shake{
+  0%{transform:translate(0,0)}20%{transform:translate(-5px,2px)}40%{transform:translate(5px,-3px)}
+  60%{transform:translate(-3px,-1px)}80%{transform:translate(2px,2px)}100%{transform:translate(0,0)}
+}
+.row{display:grid;grid-template-columns:1fr 88px 1fr;align-items:center;gap:18px;padding:26px 0;border-bottom:3px solid rgba(1,90,132,.2)}
+.row:last-child{border-bottom:0}
+.lab{
+  background:transparent;border:0;border-radius:10px;color:var(--blue);opacity:.62;
+  font:inherit;font-weight:700;font-size:.9rem;letter-spacing:.05em;text-transform:uppercase;
+  cursor:pointer;padding:10px 14px;max-width:100%;
+  transition:opacity .25s,background .25s,color .25s,box-shadow .25s;
+}
+.lab.left{text-align:right;justify-self:end}
+.lab.right{text-align:left;justify-self:start}
+.lab:hover{opacity:1}
+.lab.on{opacity:1;background:var(--blue);color:var(--cream);box-shadow:4px 4px 0 var(--green);animation:labpop .4s cubic-bezier(.3,1.6,.5,1)}
+@keyframes labpop{0%{transform:scale(.86)}60%{transform:scale(1.08)}100%{transform:scale(1)}}
+.lab:focus-visible{outline:3px solid var(--green);outline-offset:3px}
+.track{position:relative;width:88px;height:44px;border-radius:22px;background:var(--cream);border:3px solid var(--blue);cursor:pointer;touch-action:none;user-select:none;box-shadow:3px 3px 0 var(--blue)}
+.thumb{position:absolute;top:3px;left:3px;width:32px;height:32px;transition:transform .35s cubic-bezier(.3,1.6,.5,1)}
+.core{width:100%;height:100%;border-radius:50%;background:var(--green);border:3px solid var(--blue);transition:background .3s}
+.core.squash{animation:squash .45s ease-out}
+@keyframes squash{0%{transform:scale(1)}25%{transform:scale(1.6,.65)}55%{transform:scale(.8,1.3)}100%{transform:scale(1)}}
+.row[data-side="1"] .thumb{transform:translateX(44px)}
+.row.moved .core{background:var(--blue)}
+@media (max-width:520px){
+  .card{padding:2px 12px;box-shadow:6px 6px 0 var(--blue)}
+  .row{gap:6px;padding:20px 0}
+  .lab{font-size:.68rem;padding:8px 8px;letter-spacing:.03em}
+}
+@media (prefers-reduced-motion:reduce){
+  .card.shake,.lab.on,.core.squash{animation:none}
+}
+</style>
+</head>
+<body>
+<canvas id="fx" aria-hidden="true"></canvas>
+<div class="card" id="sliders"></div>
+<script>
+const AXES = [
+  {opts:[{n:1,label:'Moderate Realism'},{n:2,label:'Nominalism'}]},
+  // Display order only: Abstract on the left, Fundamental on the right. The logic runs on the internal values.
+  {opts:[{n:4,label:'Consciousness is Abstract'},{n:3,label:'Consciousness is Fundamental'}]},
+  {opts:[{n:5,label:'Physicalism'},{n:6,label:'Non-Physicalism'}]}
+];
+// Numbers are internal tracking only and are never shown.
+const STABLE = [[1,3,6],[1,4,5],[1,4,6],[2,3,6]];
+let state = [1,3,6];
+let flashTimer = null;
+const rows = [];
+const RM = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------- sparks ----------
+const cv = document.getElementById('fx'), cx = cv.getContext('2d');
+let W = 0, H = 0, parts = [], rings = [], running = false, last = 0;
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', resize); resize();
+const COLORS = ['#05B084', '#015A84', '#05B084', '#015A84', '#BADFCD'];
+function burst(x, y, n, power = 1){
+  if (RM) return;
+  for (let i = 0; i < n; i++){
+    const a = Math.random() * Math.PI * 2, s = (140 + Math.random() * 480) * power;
+    parts.push({x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 90 * power, life: 0,
+      max: .4 + Math.random() * .5, w: 2 + Math.random() * 3.5, len: .5 + Math.random(),
+      c: COLORS[(Math.random() * COLORS.length) | 0], sq: Math.random() < .25});
+  }
+  rings.push({x, y, life: 0, max: .45, R: 28 + 34 * power});
+  if (!running){ running = true; last = performance.now(); requestAnimationFrame(frame); }
+}
+function frame(t){
+  const dt = Math.min((t - last) / 1000, .05); last = t;
+  cx.clearRect(0, 0, W, H);
+  cx.lineCap = 'round';
+  parts = parts.filter(p => p.life < p.max);
+  for (const p of parts){
+    p.life += dt;
+    const f = Math.pow(.03, dt);
+    p.vx *= f; p.vy = p.vy * f + 900 * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const k = 1 - p.life / p.max;
+    cx.globalAlpha = Math.max(k, 0);
+    if (p.sq){
+      cx.fillStyle = p.c;
+      const s = p.w * 2 * k;
+      cx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+    } else {
+      cx.strokeStyle = p.c; cx.lineWidth = p.w * k + .5;
+      cx.beginPath(); cx.moveTo(p.x, p.y);
+      cx.lineTo(p.x - p.vx * .04 * p.len, p.y - p.vy * .04 * p.len);
+      cx.stroke();
+    }
+  }
+  rings = rings.filter(r => r.life < r.max);
+  for (const r of rings){
+    r.life += dt;
+    const k = r.life / r.max, e = 1 - Math.pow(1 - k, 3);
+    cx.globalAlpha = 1 - k; cx.strokeStyle = '#015A84'; cx.lineWidth = 4 * (1 - k) + .5;
+    cx.beginPath(); cx.arc(r.x, r.y, 6 + (r.R - 6) * e, 0, Math.PI * 2); cx.stroke();
+  }
+  cx.globalAlpha = 1;
+  if (parts.length || rings.length) requestAnimationFrame(frame); else running = false;
+}
+function thumbCenter(i){
+  const r = rows[i].track.getBoundingClientRect();
+  const side = AXES[i].opts.findIndex(o => o.n === state[i]);
+  return [r.left + 22 + side * 44, r.top + r.height / 2];
+}
+function squash(i){
+  const c = rows[i].track.querySelector('.core');
+  c.classList.remove('squash'); void c.offsetWidth; c.classList.add('squash');
+}
+function fx(axis, moved){
+  const card = document.getElementById('sliders');
+  card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
+  const [x, y] = thumbCenter(axis);
+  burst(x, y, 28, 1); squash(axis);
+  moved.forEach((i, k) => setTimeout(() => {
+    const [mx, my] = thumbCenter(i);
+    burst(mx, my, 18, .8); squash(i);
+  }, 140 + k * 120));
+}
+document.addEventListener('pointerdown', e => burst(e.clientX, e.clientY, 8, .5));
+
+// ---------- logic ----------
+// Pin one axis to a value; pick the stable configuration that requires the fewest changes to the other sliders (ties are broken at random).
+function select(axis, value){
+  if (state[axis] === value) return;
+  const cands = STABLE.filter(c => c[axis] === value);
+  const dist = c => c.reduce((d,v,i) => d + (i !== axis && v !== state[i] ? 1 : 0), 0);
+  const minD = Math.min(...cands.map(dist));
+  const ties = cands.filter(c => dist(c) === minD);
+  const best = ties[Math.floor(Math.random() * ties.length)];
+  const moved = [];
+  best.forEach((v,i) => { if (i !== axis && v !== state[i]) moved.push(i); });
+  state = best.slice();
+  render(moved);
+  fx(axis, moved);
+}
+
+function render(moved = []){
+  rows.forEach((r,i) => {
+    const side = AXES[i].opts.findIndex(o => o.n === state[i]);
+    r.el.dataset.side = side;
+    r.labs[0].classList.toggle('on', side === 0);
+    r.labs[1].classList.toggle('on', side === 1);
+    r.el.classList.toggle('moved', moved.includes(i));
+  });
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => rows.forEach(r => r.el.classList.remove('moved')), 1200);
+}
+
+function build(){
+  const host = document.getElementById('sliders');
+  AXES.forEach((ax, i) => {
+    const el = document.createElement('div');
+    el.className = 'row';
+    const mk = (o, cls) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lab ' + cls;
+      b.textContent = o.label;
+      b.addEventListener('click', () => select(i, o.n));
+      return b;
+    };
+    const l = mk(ax.opts[0], 'left'), r = mk(ax.opts[1], 'right');
+    const track = document.createElement('div');
+    track.className = 'track';
+    track.innerHTML = '<div class="thumb"><div class="core"></div></div>';
+    let dragging = false, onThumb = false, dragged = false;
+    const sideAt = e => {
+      const rect = track.getBoundingClientRect();
+      return (e.clientX - rect.left) < rect.width / 2 ? 0 : 1;
+    };
+    track.addEventListener('pointerdown', e => {
+      dragging = true; dragged = false;
+      onThumb = !!e.target.closest('.thumb');
+      track.setPointerCapture(e.pointerId);
+      if (!onThumb) select(i, ax.opts[sideAt(e)].n);
+    });
+    track.addEventListener('pointermove', e => {
+      if (!dragging) return;
+      const s = sideAt(e);
+      if (ax.opts[s].n !== state[i]){ dragged = true; select(i, ax.opts[s].n); }
+    });
+    track.addEventListener('pointerup', () => {
+      if (dragging && onThumb && !dragged){
+        const cur = ax.opts.findIndex(o => o.n === state[i]);
+        select(i, ax.opts[1 - cur].n);
+      }
+      dragging = false; onThumb = false;
+    });
+    track.addEventListener('pointercancel', () => { dragging = false; onThumb = false; });
+    el.append(l, track, r);
+    host.appendChild(el);
+    rows.push({el, labs:[l, r], track});
+  });
+  render();
+}
+build();
+</script>
+</body>
+</html>
